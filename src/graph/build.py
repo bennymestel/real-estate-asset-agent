@@ -22,9 +22,9 @@ from langgraph.graph import END, START, StateGraph
 from src.config import settings
 from src.data.catalog import get_catalog
 from src.data.loader import load_ledger
-from src.graph import analyst, nodes
+from src.graph import analyst, nodes, responder
 from src.graph.state import AgentState, BranchResult
-from src.schemas import Clarification, DATA_INTENTS, Intent
+from src.schemas import Clarification, DATA_INTENTS
 
 
 def safe_node(fn: Callable) -> Callable:
@@ -89,50 +89,7 @@ def analyst_node(state: AgentState) -> dict:
 
 @safe_node
 def responder_node(state: AgentState) -> dict:
-    if state.get("error"):
-        return {"answer": f"Sorry — I hit an internal error ({state['error']}). "
-                          "Try rephrasing the question.",
-                "trace": ["responder: error mode"]}
-    parts = [_render_branch(br) for br in state["results"]]
-    if state.get("dropped"):
-        cap = settings.max_sub_questions
-        parts.append(f"_I answered the first {cap} parts; {state['dropped']} more "
-                     "weren't covered — ask again for those._")
-    return {"answer": "\n\n".join(p for p in parts if p),
-            "trace": ["responder: assembled answer"]}
-
-
-def _render_branch(br: BranchResult) -> str:
-    if br.clarification is not None:
-        c = br.clarification
-        txt = f"**{br.text}**\n{c.detail}."
-        if c.options:
-            txt += "\nI can give you: " + "; ".join(c.options) + "."
-        return txt
-    if br.data is not None:
-        txt = br.headline
-        for cav in br.caveats:
-            txt += f"\n_· {cav}_"
-        return txt
-    return _render_nondata(br)
-
-
-def _render_nondata(br: BranchResult) -> str:
-    if br.intent is Intent.capability:
-        return "Here's what I have to work with:\n\n" + get_catalog().schema_card()
-    if br.intent is Intent.general_knowledge:
-        return (f"_[general real-estate knowledge on \"{br.text}\" — the LLM responder "
-                "in step 5 writes this, labelled \"industry knowledge, not from your ledger\"]_")
-    if br.intent is Intent.unsupported:
-        return ("That needs data this ledger doesn't hold (valuation, cap rate, occupancy, "
-                "address, floor area or lease terms). I can show net P&L, revenue, expenses, "
-                "comparisons, rankings, breakdowns and a data-quality scan.")
-    if br.intent is Intent.out_of_scope:
-        return ("I'm an asset-management assistant for this portfolio, so I can't help with "
-                "that — but ask me about P&L, tenants, expenses or anomalies in the ledger.")
-    return ("Could you be more specific? I can show P&L for a property, tenant or period, "
-            "compare two of them, rank tenants or categories, break a total down, or scan "
-            "the ledger for data-quality issues.")
+    return responder.respond(state)
 
 
 # --- routing -----------------------------------------------------------------

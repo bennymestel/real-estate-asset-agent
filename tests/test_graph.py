@@ -1,10 +1,10 @@
-"""Full-graph scenarios. The two LLM calls (supervisor split, extractor spec) are
-monkeypatched with canned output; ground(), the analyst tools and routing all run
-for real. Zero API calls.
+"""Full-graph scenarios. The three LLM calls (supervisor split, extractor spec,
+responder writer) are monkeypatched; ground(), the analyst tools, the numeric
+grounding check and routing all run for real. Zero API calls.
 """
 import pytest
 
-from src.graph import nodes
+from src.graph import nodes, responder
 from src.graph.build import build_graph
 from src.schemas import Intent, QuerySpec, SubQuestion, SupervisorPlan
 
@@ -22,6 +22,8 @@ def run_graph(monkeypatch):
         specs = specs or {}
         monkeypatch.setattr(nodes, "supervisor", lambda q, h=None: sup_plan)
         monkeypatch.setattr(nodes, "_extract_spec", lambda sub: specs[sub.text])
+        monkeypatch.setattr(responder, "_write",
+                            lambda digest, retry_flag=None: digest)
         graph = build_graph()
         return graph.invoke(
             {"question": "q", "history": [], "pending": [], "results": [], "trace": []},
