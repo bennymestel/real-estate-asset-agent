@@ -4,7 +4,7 @@ A LangGraph multi-agent assistant that answers natural-language asset-management
 over a general-ledger dataset (`data/cortex.parquet`) — P&L, comparisons, rankings, entity
 detail cards, and a data-quality anomaly scan — with a Streamlit chat UI.
 
-**Live demo:** _add Streamlit Cloud URL here after deploy_
+**Live demo:** https://real-estate-asset-agent.streamlit.app/
 **Design record:** [PLAN.md](PLAN.md) — the full plan this was built from, including
 rejected alternatives.
 
