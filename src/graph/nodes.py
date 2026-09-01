@@ -48,6 +48,15 @@ def supervisor(question: str, history: list[tuple[str, str]] | None = None) -> S
     return plan
 
 
+def _extract_spec(sub: SubQuestion) -> QuerySpec:
+    """The extractor's single LLM call, isolated so the graph tests can mock it."""
+    llm = get_llm("fast").with_structured_output(QuerySpec)
+    return llm.invoke([
+        SystemMessage(prompts.extractor_system()),
+        HumanMessage(sub.text),
+    ])
+
+
 def extractor(sub: SubQuestion, cat: Catalog | None = None) -> ResolvedQuery | Clarification:
     cat = cat or get_catalog()
     if sub.intent not in DATA_INTENTS:
@@ -55,12 +64,7 @@ def extractor(sub: SubQuestion, cat: Catalog | None = None) -> ResolvedQuery | C
             f"extractor called with non-data intent {sub.intent.value}; "
             "route these straight to the responder"
         )
-    llm = get_llm("fast").with_structured_output(QuerySpec)
-    spec: QuerySpec = llm.invoke([
-        SystemMessage(prompts.extractor_system()),
-        HumanMessage(sub.text),
-    ])
-    return ground(spec, sub, cat)
+    return ground(_extract_spec(sub), sub, cat)
 
 
 def ground(spec: QuerySpec, sub: SubQuestion, cat: Catalog) -> ResolvedQuery | Clarification:
