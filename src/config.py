@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 load_dotenv()
 
@@ -35,3 +36,18 @@ class Settings:
 
 
 settings = Settings()
+
+
+def get_llm(tier: str = "fast", **overrides):
+    if not settings.google_api_key:
+        raise RuntimeError(
+            "GOOGLE_API_KEY is not set — add it to .env (see .env.example)."
+        )
+    model = settings.llm_model_smart if tier == "smart" else settings.llm_model_fast
+    params = {
+        "model": model,
+        "google_api_key": settings.google_api_key,
+        "temperature": settings.llm_temperature,
+    }
+    params.update(overrides)
+    return ChatGoogleGenerativeAI(**params)

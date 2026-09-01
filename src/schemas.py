@@ -1,13 +1,20 @@
-"""Shared data-holder types for the deterministic tool layer.
+"""Shared types.
 
-TimeRange = which months. LedgerQuery = which rows. Metric/Bucket/Breakdown/Finding
-= what a tool hands back. LLM-facing models (Intent, QuerySpec) join this file in step 3.
+Deterministic tool layer: TimeRange (which months), LedgerQuery (which rows),
+Metric/Bucket/Breakdown/Finding (what a tool returns).
+
+LLM layer: Intent, SubQuestion, SupervisorPlan, QuerySpec (Pydantic — the models
+the supervisor/extractor emit), plus Clarification and ResolvedQuery (the grounded
+results the extractor hands to the analyst).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Literal, Optional
 
 import pandas as pd
+from pydantic import BaseModel, Field
 
 from src.data.catalog import Catalog
 
@@ -113,3 +120,95 @@ class Finding:
     summary: str
     magnitude: float
     detail: str = ""
+
+
+# --- LLM layer -----------------------------------------------------------------
+
+
+class Intent(str, Enum):
+    pnl_metric = "pnl_metric"
+    comparison = "comparison"
+    ranking = "ranking"
+    entity_details = "entity_details"
+    anomaly_scan = "anomaly_scan"
+    general_knowledge = "general_knowledge"
+    capability = "capability"
+    unsupported = "unsupported"
+    vague = "vague"
+    out_of_scope = "out_of_scope"
+
+
+DATA_INTENTS: frozenset[Intent] = frozenset({
+    Intent.pnl_metric, Intent.comparison, Intent.ranking,
+    Intent.entity_details, Intent.anomaly_scan,
+})
+
+
+class SubQuestion(BaseModel):
+    text: str = Field(description="one self-contained question, no 'and'")
+    intent: Intent
+
+
+class SupervisorPlan(BaseModel):
+    sub_questions: list[SubQuestion] = Field(
+        description="the message split into atomic parts; always at least one, "
+                    "each with its own intent",
+    )
+    reasoning: str = Field(default="", description="one short line explaining the split")
+
+
+class QuerySpec(BaseModel):
+    operation: Literal["pnl", "breakdown", "timeseries", "top_n", "compare",
+                       "details", "anomalies"]
+    metric: Literal["net_pnl", "revenue", "expenses"] = "net_pnl"
+    properties: list[str] = Field(default_factory=list, description="names as written")
+    tenants: list[str] = Field(default_factory=list)
+    ledger_groups: list[str] = Field(default_factory=list)
+    ledger_categories: list[str] = Field(default_factory=list)
+    timeframe: str = Field(
+        default="all",
+        description="'all', a year '2024', a quarter '2025-Q1', a month '2025-M02', "
+                    "or a relative phrase like 'this year' / 'same period last year'",
+    )
+    compare_timeframes: list[str] = Field(
+        default_factory=list,
+        description="two+ periods to compare, e.g. ['2024-Q1', '2024-Q2'] for "
+                    "'compare Q1 and Q2'; leave empty for a single-period question",
+    )
+    group_by: Optional[Literal["property_name", "tenant_name", "ledger_type",
+                               "ledger_group", "ledger_category",
+                               "month", "quarter", "year"]] = None
+    top_n: Optional[int] = None
+    unsupported_field: Optional[str] = Field(
+        default=None,
+        description="set if the question needs a field the ledger lacks: price, "
+                    "valuation, appraisal, cap rate, occupancy, address, area, lease terms",
+    )
+
+
+class ClarifyReason(str, Enum):
+    unknown_entity = "unknown_entity"
+    unsupported_field = "unsupported_field"
+    uncovered_timeframe = "uncovered_timeframe"
+    vague = "vague"
+
+
+@dataclass(frozen=True)
+class Clarification:
+    reason: ClarifyReason
+    detail: str
+    options: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResolvedQuery:
+    operation: str
+    query: LedgerQuery
+    timeframe_label: str
+    group_by: str | None = None
+    top_n: int | None = None
+    rank_by: Literal["value", "magnitude"] = "value"
+    members: tuple[str, ...] = ()
+    subject: str | None = None       # for details: property / tenant / "Portfolio"
+    caveats: tuple[str, ...] = ()
+    trace: tuple[str, ...] = ()

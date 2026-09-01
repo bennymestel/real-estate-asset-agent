@@ -60,11 +60,15 @@ def timeseries(df: pd.DataFrame, q: LedgerQuery, *, by: str = "month",
 
 
 def top_n(df: pd.DataFrame, q: LedgerQuery, by: str, n: int = 5, *,
-          label: str | None = None, dropna: bool = True) -> Breakdown:
+          label: str | None = None, dropna: bool = True,
+          rank_by: str = "value") -> Breakdown:
     full = breakdown(df, q, by, dropna=dropna)
-    top = full.buckets[:n]
+    buckets = full.buckets
+    if rank_by == "magnitude":
+        buckets = sorted(buckets, key=lambda b: abs(b.value), reverse=True)
+    top = buckets[:n]
     return Breakdown(by, top, label or f"top {n} by {by}",
-                     full.trace + [f"kept top {len(top)} of {len(full.buckets)}"])
+                     full.trace + [f"kept top {len(top)} of {len(full.buckets)} by {rank_by}"])
 
 
 def compare(df: pd.DataFrame, q: LedgerQuery, by: str, members: list[str], *,

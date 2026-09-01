@@ -83,6 +83,15 @@ def test_top_tenants(df):
     ]
 
 
+def test_top_expense_by_magnitude(df):
+    q = LedgerQuery(ledger_types=("expenses",))
+    by_value = top_n(df, q, "ledger_category", 1).buckets[0]
+    by_mag = top_n(df, q, "ledger_category", 1, rank_by="magnitude").buckets[0]
+    assert by_value.key == "maintenance_owner"          # least-negative, the old bug
+    assert by_mag.key == "interest_mortgage"
+    assert by_mag.value == -668_593.43
+
+
 def test_compare_two_buildings_keeps_order(df):
     c = compare(df, LedgerQuery(), "property_name", ["Building 180", "Building 120"])
     assert [(b.key, b.value) for b in c.buckets] == [
