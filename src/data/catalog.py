@@ -38,6 +38,14 @@ class Catalog:
     coverage_end: str
     reporting_as_of: str
     category_descriptions: dict[str, str] = field(default_factory=dict)
+    month_quarter: dict[str, str] = field(default_factory=dict)  # "2024-M01" -> "2024-Q1"
+    month_year: dict[str, str] = field(default_factory=dict)     # "2024-M01" -> "2024"
+
+    def months_in_year(self, year: str | int) -> list[str]:
+        return [m for m in self.months if self.month_year[m] == str(year)]
+
+    def months_in_quarter(self, quarter: str) -> list[str]:
+        return [m for m in self.months if self.month_quarter[m] == quarter]
 
     def schema_card(self) -> str:
         cats = ", ".join(self.ledger_categories)
@@ -73,6 +81,7 @@ def get_catalog() -> Catalog:
         .set_index("ledger_category")["ledger_description"]
         .to_dict()
     )
+    period_map = df[["month", "quarter", "year"]].drop_duplicates().set_index("month")
     return Catalog(
         entities=uniq("entity_name"),
         properties=uniq("property_name"),
@@ -88,6 +97,8 @@ def get_catalog() -> Catalog:
         coverage_end=end,
         reporting_as_of=settings.reporting_as_of.isoformat(),
         category_descriptions=descriptions,
+        month_quarter=period_map["quarter"].to_dict(),
+        month_year=period_map["year"].to_dict(),
     )
 
 
