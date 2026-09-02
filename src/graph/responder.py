@@ -20,6 +20,9 @@ from src.tools.details import Card
 _ERR = ("Sorry — I hit an internal error ({err}). Try rephrasing the question.")
 _NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 _TOL = 0.03  # relative slack for readable rounding / abbreviations
+_MONTHS = ("january", "february", "march", "april", "may", "june", "july",
+           "august", "september", "october", "november", "december")
+_ORDINAL = re.compile(r"^(?:st|nd|rd|th)?\s*(?:of\s+)?", re.I)
 
 
 def respond(state: AgentState) -> dict:
@@ -170,10 +173,28 @@ def _ungrounded(prose: str, allowed: set[float]) -> list[str]:
             continue
         if raw.isdigit() and (1900 <= int(raw) <= 2100 or int(raw) <= 12):
             continue  # a year, or a small count / ordinal
+        if _is_date_day(prose, m.start(), m.end(), raw):
+            continue  # the day in a spelled-out date ("31 March 2025")
         v *= _scale(prose, m.end(), nxt)
         if not _grounded(v, allowed):
             bad.append(tok)
     return bad
+
+
+def _is_date_day(prose: str, start: int, end: int, raw: str) -> bool:
+    """True for the 13..31 in "31 March 2025" / "March 31, 2025" — a date, not a figure.
+
+    Days 1..12 already pass as small counts; without this the responder's own
+    reporting date ("as of 31 March 2025") is rejected as an invented number and
+    every narrated comparison falls back to raw figures.
+    """
+    if not raw.isdigit() or not 1 <= int(raw) <= 31:
+        return False
+    after = _ORDINAL.sub("", prose[end:end + 16]).lower()
+    if after.startswith(_MONTHS):
+        return True
+    before = prose[max(0, start - 16):start].lower().rstrip()
+    return before.endswith(_MONTHS)
 
 
 def _scale(prose: str, end: int, nxt: str) -> int:

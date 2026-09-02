@@ -152,3 +152,21 @@ def test_per_property_excludes_entity_level(cat):
                  sub("p&l for building 120", Intent.pnl_metric), cat)
     assert out.query.include_entity_level is False
     assert any("entity-level" in c for c in out.caveats)
+
+
+def test_ranking_direction(cat):
+    """Either source can ask for the bottom: the spec, or — when the extractor
+    misses it, as it does here — the wording of the question itself."""
+    spec = QuerySpec(operation="top_n", group_by="property_name", top_n=1)
+    assert ground(spec, sub("which property lost the most money in 2024",
+                            Intent.ranking), cat).direction == "bottom"
+    assert ground(spec.model_copy(update={"direction": "bottom"}),
+                  sub("rank my properties", Intent.ranking), cat).direction == "bottom"
+    assert ground(spec, sub("who are my top tenants", Intent.ranking),
+                  cat).direction == "top"
+
+
+def test_nonsense_top_n_is_dropped(cat):
+    out = ground(QuerySpec(operation="top_n", group_by="tenant_name", top_n=-1),
+                 sub("least profitable tenant", Intent.ranking), cat)
+    assert out.top_n is None

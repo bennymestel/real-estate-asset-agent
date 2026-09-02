@@ -88,3 +88,13 @@ def test_numbers_and_ungrounded():
     assert responder._ungrounded("that is 47% of revenue", allowed) == []     # percentage skipped
     assert responder._ungrounded("we booked €5,000,000", allowed) == ["5,000,000"]
     assert responder._ungrounded("147 rows matched", allowed) == []           # count is in payload
+
+
+def test_a_spelled_date_is_not_an_invented_figure():
+    """The responder names its own reporting date; the day must not be rejected."""
+    allowed = responder._numbers(f"{_HEADLINE} sum(profit) = 361,810.32")
+    assert responder._ungrounded("as of 31 March 2025", allowed) == []
+    assert responder._ungrounded("March 31, 2025", allowed) == []
+    assert responder._ungrounded("the 21st of June 2024", allowed) == []
+    assert responder._ungrounded("we booked €31,000", allowed) == ["31,000"]
+    assert responder._ungrounded("31 properties", allowed) == ["31"]

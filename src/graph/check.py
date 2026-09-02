@@ -50,7 +50,7 @@ def main() -> None:
             else:
                 print(f"      -> {out.operation} | {out.timeframe_label}"
                       f" | group_by={out.group_by} | top_n={out.top_n}"
-                      f" | rank_by={out.rank_by}"
+                      f" | rank_by={out.rank_by} | direction={out.direction}"
                       f" | members={list(out.members)} | subject={out.subject}")
                 print(f"         filter: {out.query.describe()}")
                 for c in out.caveats:

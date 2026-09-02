@@ -135,3 +135,21 @@ def test_scan_flags_partial_2025(df):
 def test_scan_flags_tenant_7_concentration(df):
     con = [f for f in scan(df) if f.kind == "concentration"]
     assert any("Tenant 7" in f.summary for f in con)
+
+
+def test_bottom_n_returns_the_worst(df):
+    """"Which property lost the most?" must not return the best one."""
+    worst = top_n(df, LedgerQuery(), "property_name", 1, direction="bottom")
+    best = top_n(df, LedgerQuery(), "property_name", 1)
+    assert worst.buckets[0].key == "Building 17"
+    assert best.buckets[0].key == "Building 120"
+    assert worst.buckets[0].value < best.buckets[0].value
+
+
+def test_negative_n_is_clamped_not_sliced(df):
+    """n=-1 used to mean buckets[:-1] — dropping the bucket being asked about."""
+    assert top_n(df, LedgerQuery(), "tenant_name", 1,
+                 direction="bottom").buckets[0].key == "Tenant 6"
+    clamped = top_n(df, LedgerQuery(), "tenant_name", -1, direction="bottom")
+    assert len(clamped.buckets) == 1
+    assert clamped.buckets[0].key == "Tenant 6"

@@ -61,14 +61,20 @@ def timeseries(df: pd.DataFrame, q: LedgerQuery, *, by: str = "month",
 
 def top_n(df: pd.DataFrame, q: LedgerQuery, by: str, n: int = 5, *,
           label: str | None = None, dropna: bool = True,
-          rank_by: str = "value") -> Breakdown:
+          rank_by: str = "value", direction: str = "top") -> Breakdown:
+    """The n best (direction="top") or n worst (direction="bottom") buckets.
+
+    n is clamped to at least 1: a negative slice would silently drop the very
+    bucket a "which is worst?" question is asking for.
+    """
+    n = max(1, n)
     full = breakdown(df, q, by, dropna=dropna)
-    buckets = full.buckets
-    if rank_by == "magnitude":
-        buckets = sorted(buckets, key=lambda b: abs(b.value), reverse=True)
+    key = (lambda b: abs(b.value)) if rank_by == "magnitude" else (lambda b: b.value)
+    buckets = sorted(full.buckets, key=key, reverse=direction == "top")
     top = buckets[:n]
-    return Breakdown(by, top, label or f"top {n} by {by}",
-                     full.trace + [f"kept top {len(top)} of {len(full.buckets)} by {rank_by}"])
+    return Breakdown(by, top, label or f"{direction} {n} by {by}",
+                     full.trace + [f"kept {direction} {len(top)} of "
+                                   f"{len(full.buckets)} by {rank_by}"])
 
 
 def compare(df: pd.DataFrame, q: LedgerQuery, by: str, members: list[str], *,

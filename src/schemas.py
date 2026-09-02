@@ -178,7 +178,13 @@ class QuerySpec(BaseModel):
     group_by: Optional[Literal["property_name", "tenant_name", "ledger_type",
                                "ledger_group", "ledger_category",
                                "month", "quarter", "year"]] = None
-    top_n: Optional[int] = None
+    top_n: Optional[int] = Field(
+        default=None, description="how many to keep, a positive count (5 if unsure)")
+    direction: Literal["top", "bottom"] = Field(
+        default="top",
+        description="'bottom' when the question asks for the worst / least / lowest / "
+                    "smallest, 'top' otherwise",
+    )
     unsupported_field: Optional[str] = Field(
         default=None,
         description="set if the question needs a field the ledger lacks: price, "
@@ -208,6 +214,7 @@ class ResolvedQuery:
     group_by: str | None = None
     top_n: int | None = None
     rank_by: Literal["value", "magnitude"] = "value"
+    direction: Literal["top", "bottom"] = "top"
     members: tuple[str, ...] = ()
     subject: str | None = None       # for details: property / tenant / "Portfolio"
     caveats: tuple[str, ...] = ()

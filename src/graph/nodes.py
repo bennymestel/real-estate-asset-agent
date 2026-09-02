@@ -29,6 +29,8 @@ from src.schemas import (
 )
 
 _METRIC_TO_TYPES = {"net_pnl": (), "revenue": ("revenue",), "expenses": ("expenses",)}
+_BOTTOM_WORDS = ("worst", "least", "lowest", "smallest", "bottom", "weakest",
+                 "poorest", "lost the most", "losing the most", "underperform")
 _CLARIFY_OPTIONS = (
     "net P&L, revenue or expenses for a property/tenant/period",
     "a breakdown by property, tenant, month or category",
@@ -107,6 +109,10 @@ def ground(spec: QuerySpec, sub: SubQuestion, cat: Catalog) -> ResolvedQuery | C
     members: tuple[str, ...] = ()
     subject: str | None = None
     rank_by = "value"
+    direction = "bottom" if _wants_bottom(spec, sub.text) else "top"
+    # the LLM may emit a nonsense count (-1 has been seen); a negative slice would
+    # drop the very bucket a "which is worst?" question asks for.
+    n = spec.top_n if spec.top_n and spec.top_n > 0 else None
 
     if sub.intent is Intent.anomaly_scan:
         op = "anomalies"
@@ -145,14 +151,15 @@ def ground(spec: QuerySpec, sub: SubQuestion, cat: Catalog) -> ResolvedQuery | C
         query=query,
         timeframe_label=tr.label,
         group_by=group_by,
-        top_n=spec.top_n,
+        top_n=n,
         rank_by=rank_by,
+        direction=direction,
         members=members,
         subject=subject,
         caveats=tuple(caveats),
         trace=(
             f"intent={sub.intent.value}",
-            f"operation={op}",
+            f"operation={op}" + (f" ({direction})" if op == "top_n" else ""),
             f"timeframe={tr.label}",
             f"filter: {query.describe()}",
         ),
@@ -196,6 +203,13 @@ def _compare_over_periods(spec, sub, cat, props, tenants, groups, categories):
             f"filter: {query.describe()}",
         ),
     )
+
+
+def _wants_bottom(spec: QuerySpec, text: str) -> bool:
+    """Ranking direction. The wording is checked too: the extractor has been seen
+    classifying "which property lost the most money?" as a plain top-N, which
+    returns the single most profitable property and reads as its opposite."""
+    return spec.direction == "bottom" or any(w in text.lower() for w in _BOTTOM_WORDS)
 
 
 def _scan_unsupported(text: str) -> str | None:

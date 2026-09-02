@@ -70,8 +70,8 @@ def run(rq: ResolvedQuery, df: pd.DataFrame | None = None,
 
     if op == "top_n":
         n = rq.top_n or 5
-        b = top_n(df, q, rq.group_by, n, rank_by=rq.rank_by,
-                  label=f"top {n} {_dim(rq.group_by)} by {rq.rank_by}")
+        b = top_n(df, q, rq.group_by, n, rank_by=rq.rank_by, direction=rq.direction,
+                  label=f"{rq.direction} {n} {_dim(rq.group_by)} by {rq.rank_by}")
         return b, f"{b.label} ({rq.timeframe_label}) — {_bucket_line(b.buckets)}"
 
     if op == "compare":

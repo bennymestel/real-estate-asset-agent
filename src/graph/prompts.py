@@ -66,7 +66,9 @@ details (a full card for one property / tenant / the portfolio) | anomalies (dat
   relative phrase ('this year', 'last quarter', 'same period last year')
 - compare_timeframes: for a period-vs-period comparison, list each period
   ('Q1 vs Q2 for Building 120' -> ['2024-Q1', '2024-Q2']); empty otherwise
-- group_by / top_n: only when the question implies them
+- group_by / top_n: only when the question implies them; top_n is a positive count
+- direction: 'bottom' for worst / least / lowest / smallest / "lost the most",
+  'top' otherwise
 - unsupported_field: set it (nothing else matters then) if the question needs a field
   the ledger lacks: price, valuation, appraisal, cap rate, occupancy, address, area,
   lease terms
