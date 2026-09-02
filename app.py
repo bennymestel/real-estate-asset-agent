@@ -113,10 +113,10 @@ for msg in st.session_state.messages:
         if msg["role"] == "assistant":
             render_extras(msg)
 
-with st.expander("💡 Example questions", expanded=not st.session_state.messages):
-    cols = st.columns(2)
+with st.sidebar:
+    st.markdown("**Try one of these:**")
     for i, ex in enumerate(EXAMPLES):
-        if cols[i % 2].button(ex, use_container_width=True, key=f"ex_{i}"):
+        if st.button(ex, use_container_width=True, key=f"ex_{i}"):
             st.session_state.pending_question = ex
             st.rerun()
 
