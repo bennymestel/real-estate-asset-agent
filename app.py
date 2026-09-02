@@ -114,7 +114,7 @@ for msg in st.session_state.messages:
             render_extras(msg)
 
 with st.sidebar:
-    st.markdown("**Try one of these:**")
+    st.markdown("**Example prompts**")
     for i, ex in enumerate(EXAMPLES):
         if st.button(ex, use_container_width=True, key=f"ex_{i}"):
             st.session_state.pending_question = ex
