@@ -6,6 +6,8 @@ rankings, entity detail cards, and a data-quality scan — through a Streamlit c
 
 **Live demo:** https://real-estate-asset-agent.streamlit.app/
 
+_First load can take ~1 min while Streamlit Cloud wakes the app._
+
 ## Setup
 
 ```bash
