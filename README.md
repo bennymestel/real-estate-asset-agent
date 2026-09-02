@@ -1,202 +1,128 @@
 # Real Estate Asset Agent
 
-A LangGraph multi-agent assistant that answers natural-language asset-management questions
-over a general-ledger dataset (`data/cortex.parquet`) — P&L, comparisons, rankings, entity
-detail cards, and a data-quality anomaly scan — with a Streamlit chat UI.
+A LangGraph multi-agent assistant that answers natural-language asset-management
+questions over a general-ledger dataset (`data/cortex.parquet`) — P&L, comparisons,
+rankings, entity detail cards, and a data-quality scan — through a Streamlit chat UI.
 
 **Live demo:** https://real-estate-asset-agent.streamlit.app/
-**Design record:** [PLAN.md](PLAN.md) — the full plan this was built from, including
-rejected alternatives.
 
 ## Setup
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate   # Python 3.10+
 pip install -r requirements.txt
 cp .env.example .env        # then set GOOGLE_API_KEY
-pytest                       # 79 tests, zero API calls (LLM calls are mocked)
+pytest
 streamlit run app.py
 ```
 
-CLI, for one-off questions without the UI:
+One-off questions without the UI:
+
 ```bash
 python -m src.graph.run "Compare Building 120 and Building 180, and flag anything odd"
 ```
 
-## The dataset, and why it drives the design
+## Solution and architecture
 
-3,924 rows × 12 columns — a **general-ledger fact table**, not an asset register. Each row is
-one posted line: an entity, an optional property, an optional tenant, a ledger
-type/group/category/code/description, a `month`/`quarter`/`year`, and a signed `profit` —
-the *only* numeric column. No price, valuation, appraisal date, address, floor area,
-occupancy or lease terms exist anywhere in the data.
+The user asks in natural language; a four-node LangGraph pipeline turns that into a
+validated query, runs it in pandas, and narrates the result. **The LLM never does
+arithmetic** — it only turns language into a typed object, or a result back into prose.
+Everything in between is plain, tested Python.
 
-That matters because two of the example questions in the brief ("price of my asset at 123
-Main St", "Last Appraisal Date") are **not answerable from this dataset**. The honest move
-is to say so plainly and offer what the ledger *can* show, rather than inventing a number —
-that's the core of the "handles unexpected input" requirement, and it's why the graph has a
-dedicated grounding step between extraction and calculation (below).
+The LLM is `gemini-3.1-flash-lite` via `langchain-google-genai` — `with_structured_output`
+for the two typed nodes, free prose for the writer. It is the cheapest, fastest Gemini, so
+the hosted demo stays free and responsive; a `LLM_MODEL_*` env var swaps in a larger model
+with no code change.
 
-Other facts that shaped the design, all backed by tests in `tests/test_metrics.py`:
+### The dataset
 
-- **Signs are messy.** `sales_discounts` is negative revenue; 16 expense categories
-  (e.g. `interest_mortgage`, +442k) net *positive*. So "revenue = positive amounts" is false —
-  every total is `sum(profit)`, split by `ledger_type`, never by sign.
-- **Duplicate rows are real and must not be deduped.** 1,747 of 3,924 rows are exact repeats.
-  Most are `profit = 0` and inert. The ones that carry value are posting-and-reversal
-  chains — e.g. Building 180 / Tenant 14 / 2024-M06 is `+97,708.92 ×3` and `−97,708.92 ×2`,
-  netting to exactly one month's rent. Deduping any of these deletes real revenue (a naive
-  `drop_duplicates()` drops the ledger-wide net P&L by ~35%). Signed summation over every row
-  is the only correct read.
-- **One genuine data defect exists:** ledger code `4650` is mapped to two different
-  `ledger_category` values (`bank_charges` and `financial_expenses`) with the same
-  description, across 121 rows, double-counting −3,627.54 (0.24% of net P&L). The anomaly
-  scan surfaces this as a finding rather than silently patching it, so every number the
-  agent states still ties back to the raw ledger.
-- **2025 is a partial year** (Q1 only, ledger ends 2025-M03) — every year-level figure that
-  includes 2025 says so.
+The only data source is `data/cortex.parquet`, a **general-ledger fact table** (3,924
+rows). Each row is one posted line — entity, optional property, optional tenant, ledger
+type/group/category, period, and a signed `profit` (the only numeric column). It holds
+no prices, valuations, appraisal dates, addresses, floor areas or lease terms — so
+questions like the brief's "price of my asset at 123 Main St" have no answer here, and the
+agent says so rather than inventing one (see Challenges).
 
-Golden numbers (used as regression tests): net P&L = **€1,533,331.87**
-(2024: €1,171,521.55 · 2025-Q1: €361,810.32); revenue €2,887,652.89 / expenses
-−€1,354,321.02.
+Amounts are shown in euros: there is no currency column, but the ledger labels are
+bilingual Dutch/English ("Bankkosten | Bank charges"), which points to a euro-zone entity.
+The brief's "$" examples are illustrative.
 
-### Assumptions
-
-1. **`REPORTING_AS_OF = 2025-03-31`**, the ledger's last period. All relative dates
-   ("this year", "last quarter") resolve against it, not the wall clock — the ledger is a
-   closed book, and a literal clock read would return zero rows for most of the brief's
-   example questions. The UI states the reporting date up front.
-2. `profit` is the single signed measure; P&L = `sum(profit)`, revenue/expenses = the same
-   sum split by `ledger_type`.
-3. Rows with a null `property_name` are entity-level overhead — excluded from per-property
-   figures, included in portfolio totals, always disclosed.
-4. Duplicate rows are never deduped (evidence above); the one genuine double-count
-   (code 4650) is reported as a finding, not silently corrected.
-5. Price / valuation / cap rate / occupancy / address questions are structurally
-   unsupported — the agent says so and offers the nearest supported answer.
-6. `Building 17` is a real distinct property (not a typo for 170).
-7. Single entity (`PropCo`) — entity filtering exists but is currently a no-op.
-
-## Architecture
-
-The LLM never touches data or does arithmetic. It only ever does two things: turn language
-into a validated Pydantic object, or turn a validated result back into language. Everything
-in between — grounding, filtering, summing, ranking, the numeric fact-check — is plain,
-tested Python.
+### The graph
 
 ```
-                       ┌────────────┐
-   user turn ─────────▶│ supervisor │  classify intent + split compound question
-                       └─────┬──────┘
-                             │
-              needs data     │     no data needed (knowledge / capability /
-             ┌───────────────┴──── unsupported field / vague / out-of-scope)
-             ▼                                      │
-       ┌───────────┐   QuerySpec + grounding        │
-       │ extractor │   unknown entity / unsupported  │
-       └─────┬─────┘   field → Clarification ───────▶│
-             ▼                                      │
-       ┌───────────┐   pandas: pnl / breakdown /     │
-       │  analyst  │   timeseries / top_n / compare / │
-       └─────┬─────┘   details / anomalies            │
-             │                                      │
-             │◀── loop to extractor while           │
-             │    sub-questions remain              │
-             ▼                                      ▼
-                    ┌─────────────────────────────────┐
-                    │           responder             │
-                    │  LLM prose + numeric grounding  │  → END
-                    │  check with one repair retry    │
-                    └─────────────────────────────────┘
+              user turn
+                  │
+                  ▼
+            ┌────────────┐
+      ┌─────┤ supervisor │  classify the request; split a compound question into parts
+      │     └─────┬──────┘
+      │           │ needs data
+      │           ▼
+      │     ┌────────────┐ ◀──────────────┐
+      ├─────┤ extractor  │  fill a typed QuerySpec; resolve names against the catalog
+      │     └─────┬──────┘                │
+      │           │ resolved              │ more sub-questions
+      │           ▼                       │
+      │     ┌────────────┐                │
+      │     │  analyst   ├────────────────┘  run the query in pandas — all arithmetic here
+      │     └─────┬──────┘
+      │           │ all parts answered
+      │           ▼
+      │     ┌────────────┐
+      └────▶│ responder  │  write the answer, then check every figure against the analyst
+            └─────┬──────┘
+                  ▼
+                 END
 ```
 
-| node | job | LLM? |
+- **Bypass to `responder`** (left rail): general knowledge, "what data do you have?", an
+  unsupported field like price, or vague / out-of-scope input — `supervisor` catches what
+  the schema already rules out, `extractor` catches an unknown entity once grounding fails.
+- **Loop** (right): `analyst → extractor` while sub-questions remain — one compound message
+  answered part by part, capped at 5, overflow disclosed.
+
+| node | what it does | uses the LLM? |
 |---|---|---|
-| `supervisor` | Classifies the message and splits a compound question into typed sub-questions (`pnl_metric`, `comparison`, `ranking`, `entity_details`, `anomaly_scan`, `general_knowledge`, `capability`, `unsupported`, `vague`, `out_of_scope`). Caps at `MAX_SUB_QUESTIONS = 5`; overflow is disclosed, never silently dropped. | yes — one structured-output call |
-| `extractor` | Builds a validated `QuerySpec` (operation, properties/tenants/categories, timeframe, `group_by`, `top_n`) from one sub-question, then **deterministically** fuzzy-resolves names against the live catalog (rapidfuzz) and checks the timeframe/metric is actually answerable. Any failure returns a `Clarification` — never an LLM decision. | yes (structured) + deterministic grounding |
-| `analyst` | Runs the grounded query through pandas — `pnl`, `breakdown`, `timeseries`, `top_n`, `compare`, `details`, `anomalies` — and returns numbers plus a calculation trace (filters, rows matched, subtotals). | no — pure pandas, same input always gives the same output |
-| `responder` | The single voice of the system. Canned parts (capability schema card, unsupported-field explainer, out-of-scope redirect, vague clarifier) are fixed copy and cost zero API calls. Everything else — data answers, entity clarifications, general-knowledge asides — goes through one LLM call, followed by a **deterministic post-check**: every number in the prose must trace back to the analyst's payload (with tolerance for rounding/abbreviation, e.g. "€0.36 million"). One ungrounded figure triggers a repair retry with the offending number named; if it still doesn't ground, the response falls back to the raw analyst figures verbatim. | yes + deterministic numeric grounding check |
+| `supervisor` | Classifies the request and breaks a compound question into up to 5 typed sub-questions. | Yes — one structured-output call |
+| `extractor` | Fills a typed `QuerySpec` for one sub-question, then resolves names against the live catalog and checks the data can answer it. Anything unresolvable becomes a clarifying question — never an LLM guess. | Yes — one structured call, then deterministic grounding |
+| `analyst` | Runs the query in pandas — P&L, breakdowns, rankings, comparisons, detail cards, anomaly scan — and returns the numbers with a calculation trace. | No — pure pandas |
+| `responder` | Writes the English answer, then rejects any figure that doesn't trace back to the analyst's output (one repair retry, then falls back to the raw numbers). | Yes — one call, then a deterministic numeric check |
 
-Full node-by-node rationale, the four-case short-circuit table, and the two design
-alternatives that were considered and rejected (a single combined planner+extractor call;
-a 2-node ReAct `agent ⇄ tools` graph) are in [PLAN.md](PLAN.md).
+Four nodes because the unit of work changes four times: decide, ground, compute, speak.
+The graph is a LangGraph `StateGraph`: nodes never call each other — each returns a partial
+update to a shared state dict, and **conditional edges** read that state to route, driving
+both the short-circuit to `responder` and the `analyst → extractor` loop above. Error
+handling is a `@safe_node` decorator on every node — an exception is caught, written to
+state, and routed straight to `responder` instead of crashing the app. `MemorySaver` is the
+checkpointer, persisting state per thread so follow-ups ("...and last year?") keep context.
 
-### State
+## Assumptions
 
-Nodes never call each other directly — LangGraph passes a shared `AgentState` dict, each
-node returns only the keys it changed, and `MemorySaver` checkpoints it per `thread_id` so
-follow-ups ("...and last year?") resolve against the real conversation history.
+1. **`REPORTING_AS_OF = 2025-03-31`**, the ledger's last period. Relative dates ("this
+   year", "last quarter") resolve against this, not the wall clock — the ledger is a
+   closed book. 2025 is a partial year (Q1 only), so any figure covering it says so.
+2. `profit` is the only measure. P&L = `sum(profit)`; revenue and expenses are that same
+   sum split by `ledger_type`, never by sign (several expense categories net positive).
+3. Rows with no `property_name` are entity-level overhead — excluded from per-property
+   figures, included in portfolio totals, always disclosed.
+4. Duplicate rows are never deduped; the one genuine double-count (ledger code 4650) is
+   reported as a finding, not silently corrected.
 
-```python
-class AgentState(TypedDict, total=False):
-    question: str
-    history: list[tuple[str, str]]     # (role, text) — earlier turns, for follow-ups
-    pending: list[SubQuestion]         # drained by the extract -> analyst loop
-    results: list[BranchResult]        # one entry per finished sub-question
-    dropped: int                       # sub-questions cut by MAX_SUB_QUESTIONS
-    answer: str
-    trace: list[str]                   # rendered in the UI's Agent Trace panel
-    error: str | None                  # set by @safe_node, routes straight to responder
-```
+## Challenges faced and how they were solved
 
-### Errors
-
-Every node is wrapped by `@safe_node`: an exception is caught, written to `state["error"]`,
-and routing sends it straight to `responder`, which apologises with the underlying message
-instead of crashing the app.
-
-## Project structure
-
-```
-app.py                    # Streamlit chat UI
-src/
-  config.py                # settings + get_llm(tier) factory
-  schemas.py                # Intent, QuerySpec, ResolvedQuery, Metric/Breakdown/Finding, ...
-  data/
-    loader.py                 # cached parquet load + period parsing
-    catalog.py                 # distinct values, coverage window, schema card for prompts
-    resolver.py                 # rapidfuzz canonical name resolution
-    timeframe.py                 # relative-phrase -> TimeRange resolution
-  tools/
-    metrics.py                # pnl, breakdown, timeseries, top_n, compare
-    details.py                 # property/tenant/portfolio detail cards
-    anomalies.py                 # reversal pairs, code 4650, coverage gaps, concentration
-  graph/
-    state.py, build.py            # StateGraph wiring, conditional edges, checkpointer
-    nodes.py                        # supervisor, extractor + deterministic grounding
-    analyst.py                        # dispatches ResolvedQuery -> tools/
-    responder.py                        # LLM writer + numeric grounding check
-    prompts.py                            # system prompts (schema injected live)
-    run.py                                  # CLI entrypoint
-tests/                     # 79 tests — golden numbers, resolver, grounding, full-graph
-                              # scenarios (LLM calls mocked, deterministic layers run for real)
-```
-
-## Challenges and how they were solved
-
-- **The brief's own example questions aren't all answerable.** Rather than quietly
-  hallucinating a price, `unsupported_field` short-circuits at the supervisor (known from
-  the schema alone) or the extractor (needs the live catalog), and the responder names the
-  gap plus what *is* available.
-- **Deduping looked like an obvious data-cleaning step and was wrong.** Verified by tracing
-  the largest repeat groups by hand (see dataset section above) before deciding not to touch
-  them — a silent "fix" here would have understated net P&L by over a third.
-- **Keeping the LLM out of arithmetic entirely.** The extractor only ever fills a typed
-  `QuerySpec`; grounding and every computation are plain pandas functions with direct unit
-  tests. This makes the same question deterministic across runs and testable without any
-  API key (`tests/test_graph.py` runs the whole graph with the three LLM calls mocked).
-- **Stopping the responder from inventing a rounder number than the data supports.** A
-  regex-based grounding check with a repair retry and a verbatim-figures fallback (see
-  `responder.py` / `test_responder.py`) — cheap enough to run on every answer, strict enough
-  to reject a plausible-looking hallucination.
-- **Compound questions without over-engineering the fan-out.** A simple
-  `extract -> analyst -> extract` loop over a bounded queue, rather than a `Send` map-reduce
-  graph — one edge to reason about, and overflow past the cap is disclosed rather than
-  dropped.
+- **The brief's own example questions aren't all answerable.** Rather than hallucinate a
+  price, the request short-circuits at the supervisor (unsupported field, known from the
+  schema) or the extractor (unknown entity, needs the live catalog), and the responder
+  names the gap plus what *is* available.
+- **Keeping the LLM out of arithmetic.** The extractor only fills a typed `QuerySpec`;
+  grounding and every computation are plain pandas with unit tests. The same question is
+  deterministic across runs, and the whole suite runs with the three LLM calls mocked —
+  no API key.
+- **Stopping the responder inventing a rounder number than the data supports.** After the
+  LLM writes the prose, a check re-extracts every number and rejects any that doesn't
+  trace to the analyst's payload — one repair retry, then a fallback to the raw figures.
 
 ## Deployment
 
-Deployed to Streamlit Community Cloud from this repo's `main` branch, entrypoint `app.py`,
-with `GOOGLE_API_KEY` set in the app's Secrets. No key is committed — `.env` and
-`.streamlit/secrets.toml` are both gitignored; `.env.example` documents the required
-variable.
+Runs on Streamlit Community Cloud, deployed from `main`. The API key is entered in
+Streamlit's secrets settings, so it never goes into the repo.
