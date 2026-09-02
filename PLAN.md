@@ -5,7 +5,7 @@
 Interview take-home: a LangGraph multi-agent prototype that answers natural-language real-estate
 asset-management questions over `data/cortex.parquet`. Deliverables are a public GitHub repo, a
 deployed URL, and a README covering setup, architecture, the LangGraph workflow, and challenges.
-The repo is currently empty apart from `REQUIREMENTS.md` and the dataset — everything below is new code.
+The repo is currently empty apart from the brief and the dataset — everything below is new code.
 
 The design is driven by what the data actually is (verified, see below): a **general-ledger fact
 table**, not an asset register. Several example questions in the brief ("price of my asset at 123
@@ -133,7 +133,7 @@ Four real cases, all of which a reviewer will type into the demo:
 
 | input | why no QuerySpec is possible or needed |
 |---|---|
-| "How is NOI calculated?" / "What's a good cap rate?" | `general_knowledge` — answerable from the model, never from the ledger. **Required by the brief**, which names "general knowledge" as an intent to detect (REQUIREMENTS.md:35) and demands that "all types of questions must be handled" (:30). Scoped tight: 2–4 sentences of real-estate domain knowledge, always labelled "general industry knowledge — not from your ledger", closing with a pointer to what the data *can* show. It is an asset-management assistant, not a general chatbot — "write me a poem" still gets the out-of-scope redirect. |
+| "How is NOI calculated?" / "What's a good cap rate?" | `general_knowledge` — answerable from the model, never from the ledger. **Required by the brief**, which names "general knowledge" among the request types to detect and demands that "all types of questions must be handled, including questions that are vague, compound, or that the provided data may not fully support". Scoped tight: 2–4 sentences of real-estate domain knowledge, always labelled "general industry knowledge — not from your ledger", closing with a pointer to what the data *can* show. It is an asset-management assistant, not a general chatbot — "write me a poem" still gets the out-of-scope redirect. |
 | "What data do you have?" / "Which properties do you cover?" | Answered from the **catalog** (a static schema card), not from an aggregation. No filtering, no arithmetic. |
 | "What's the price of my asset at 123 Main St?" | The *metric* is unsupported — `price/valuation/appraisal/sqm/occupancy` aren't columns, and the schema card in the supervisor's prompt is enough to know that. No point resolving an address that can't be queried either way. |
 | "How are things going?" / "asdfgh" / "write me a poem" | Vague or out-of-scope; nothing to extract. |
