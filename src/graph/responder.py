@@ -17,7 +17,16 @@ from src.graph.state import AgentState, BranchResult
 from src.schemas import Breakdown, Intent, Metric
 from src.tools.details import Card
 
-_ERR = ("Sorry — I hit an internal error ({err}). Try rephrasing the question.")
+_ERR = "Sorry — I hit an internal error ({err}). Try rephrasing the question."
+_BUSY = ("The model is rate-limited right now. "
+         "Give it a few seconds and ask again.")
+# the provider's 429 body is a wall of quota ids, urls and retry timings; showing it
+# raw makes an ordinary throttle look like a crash.
+_BUSY_MARKERS = ("RESOURCE_EXHAUSTED", "429", "quota", "rate limit", "rate-limit")
+# the analyst truncates long bucket lists for its trace line; the digest lists every
+# bucket underneath, so leaving the marker in tells the writer data is missing.
+_TRUNC = re.compile(r";\s*\(\+\d+ more\)")
+
 _NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 _TOL = 0.03  # relative slack for readable rounding / abbreviations
 _MONTHS = ("january", "february", "march", "april", "may", "june", "july",
@@ -25,9 +34,14 @@ _MONTHS = ("january", "february", "march", "april", "may", "june", "july",
 _ORDINAL = re.compile(r"^(?:st|nd|rd|th)?\s*(?:of\s+)?", re.I)
 
 
+def _friendly_error(err: str) -> str:
+    """A transient throttle is not an internal error — say so in one line."""
+    return _BUSY if any(m in err for m in _BUSY_MARKERS) else _ERR.format(err=err)
+
+
 def respond(state: AgentState) -> dict:
     if state.get("error"):
-        return {"answer": _ERR.format(err=state["error"]), "trace": ["responder: error mode"]}
+        return {"answer": _friendly_error(state["error"]), "trace": ["responder: error mode"]}
 
     results: list[BranchResult] = list(state.get("results") or [])
     llm_parts = [br for br in results if _needs_llm(br)]
@@ -92,6 +106,7 @@ def _data_digest(br: BranchResult) -> str:
     if isinstance(d, Metric):
         lines += [f"  {t}" for t in d.trace]
     elif isinstance(d, Breakdown):
+        lines[0] = _TRUNC.sub("", lines[0])  # every bucket is listed below; nothing is elided
         lines.append(f"  total across buckets: €{d.total:,.2f}")
         lines += [f"  {b.key}: €{b.value:,.2f} ({b.rows} rows)" for b in d.buckets]
     elif isinstance(d, Card):

@@ -5,7 +5,7 @@ import pytest
 
 from src.graph import responder
 from src.graph.state import BranchResult
-from src.schemas import Intent, Metric
+from src.schemas import Breakdown, Bucket, Intent, Metric
 
 _HEADLINE = "net P&L, 2025-Q1 = €361,810.32 (147 rows)"
 _METRIC = Metric(361_810.32, 147, "net P&L, 2025-Q1",
@@ -98,3 +98,24 @@ def test_a_spelled_date_is_not_an_invented_figure():
     assert responder._ungrounded("the 21st of June 2024", allowed) == []
     assert responder._ungrounded("we booked €31,000", allowed) == ["31,000"]
     assert responder._ungrounded("31 properties", allowed) == ["31"]
+
+
+def test_a_throttle_is_not_reported_as_an_internal_error():
+    """A 429 body is quota ids and urls; raw, an ordinary throttle reads as a crash."""
+    busy = responder._friendly_error(
+        "supervisor_node: Error calling model (RESOURCE_EXHAUSTED): 429 ... quota ...")
+    assert busy == responder._BUSY
+    assert "RESOURCE_EXHAUSTED" not in busy and "429" not in busy
+    assert "KeyError: 'profit'" in responder._friendly_error("KeyError: 'profit'")
+
+
+def test_the_digest_never_claims_buckets_are_missing():
+    """The trace line truncates; the digest lists every bucket, so the marker must go."""
+    buckets = [Bucket(key=f"cat_{i}", value=-100.0 * i, rows=i) for i in range(1, 9)]
+    bd = Breakdown("ledger_category", buckets, "expenses by category", [])
+    br = BranchResult(intent=Intent.pnl_metric, text="q", data=bd,
+                      headline="expenses by category (2024) — cat_1: €-100.00; (+2 more)",
+                      caveats=[])
+    digest = responder._data_digest(br)
+    assert "more)" not in digest
+    assert all(f"cat_{i}" in digest for i in range(1, 9))
