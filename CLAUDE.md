@@ -23,7 +23,7 @@ design record: [PLAN.md](PLAN.md). Architecture, dataset facts, and rationale: [
   revenue 2,887,652.89, expenses −1,354,321.02, etc., are asserted in
   `tests/test_metrics.py`. If a code change moves one of these, that's a bug unless the
   test itself is being deliberately updated with justification.
-- **Run `pytest` before considering a change done.** The full suite (79 tests) mocks all
+- **Run `pytest` before considering a change done.** The full suite (86 tests) mocks all
   three LLM calls, so it requires no `GOOGLE_API_KEY` and makes zero network calls — there's
   no excuse to skip it.
 - **Keep the four-node shape unless there's a real reason to change it.** `PLAN.md`

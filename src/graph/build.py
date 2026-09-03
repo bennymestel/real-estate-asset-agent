@@ -6,7 +6,7 @@
        |  \
        |   analyst   run the pandas tools for that sub-question
        |  /
-    responder    assemble the answer (deterministic stub; LLM writer is step 5)
+    responder    write the answer with one LLM call, then fact-check every figure
 
 Every node is wrapped by @safe_node: an exception is caught, written to
 state['error'], and routing sends it straight to the responder.

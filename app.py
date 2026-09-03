@@ -57,40 +57,70 @@ if not settings.google_api_key:
 # --- rendering helpers -------------------------------------------------------
 
 
-def render_result(br: BranchResult) -> None:
+DIM_LABEL = {
+    "property_name": "Property", "tenant_name": "Tenant", "ledger_type": "Type",
+    "ledger_group": "Group", "ledger_category": "Category", "month": "Month",
+    "quarter": "Quarter", "year": "Year", "period": "Period",
+}
+
+_MONEY = st.column_config.NumberColumn("Value (EUR)", format="euro")
+
+
+def bucket_frame(buckets, dimension: str) -> tuple[pd.DataFrame, str]:
+    """One tidy frame per breakdown. The dimension gets a real column name —
+    Altair cannot encode an unnamed field, and the table reads better for it."""
+    col = DIM_LABEL.get(dimension, dimension.replace("_", " ").title() or "Key")
+    df = pd.DataFrame([{col: b.key, "value": b.value, "rows": b.rows} for b in buckets])
+    return df, col
+
+
+def render_breakdown(bd, title: str, chart: bool = True) -> None:
+    df, col = bucket_frame(bd.buckets, bd.dimension)
+    st.dataframe(df, hide_index=True, use_container_width=True,
+                 column_config={"value": _MONEY, "rows": "Rows"})
+    if chart and len(df) > 1:
+        st.altair_chart(
+            alt.Chart(df).mark_bar().encode(
+                x=alt.X(f"{col}:N", sort=None, title=None),
+                y=alt.Y("value:Q", title="EUR"),
+                tooltip=[col, "value", "rows"],
+            ).properties(title=title),
+            use_container_width=True,
+        )
+
+
+def render_result(br: BranchResult, answer: str = "") -> None:
     d = br.data
     if d is None:
         return
     if isinstance(d, Metric):
         pass  # the narrated answer already carries the one number; nothing extra to show
     elif isinstance(d, Breakdown):
-        df = pd.DataFrame([{"": b.key, "value": b.value, "rows": b.rows} for b in d.buckets])
-        with st.expander(f"📊 {br.headline}"):
-            st.dataframe(df, hide_index=True, use_container_width=True)
-            st.altair_chart(
-                alt.Chart(df).mark_bar().encode(x=alt.X(":N", sort=None), y="value:Q"),
-                use_container_width=True,
-            )
+        period = br.resolved.timeframe_label if br.resolved else ""
+        with st.expander(f"📊 {d.label.capitalize()}" + (f" — {period}" if period else "")):
+            render_breakdown(d, d.label.capitalize())
     elif isinstance(d, Card):
-        with st.expander(f"📇 {br.headline}"):
+        with st.expander(f"📇 {d.title}"):
             for name, bd in (("Revenue vs expenses", d.by_type), ("By group", d.by_group),
                              ("Top categories", d.top_categories)):
                 st.markdown(f"**{name}**")
-                st.dataframe(
-                    pd.DataFrame([{"": b.key, "value": b.value, "rows": b.rows} for b in bd.buckets]),
-                    hide_index=True, use_container_width=True,
-                )
+                render_breakdown(bd, name, chart=False)
             if d.notes:
                 st.caption(" · ".join(d.notes))
     elif isinstance(d, list) and d and isinstance(d[0], Finding):
-        with st.expander(f"🔎 {br.headline}"):
+        with st.expander(f"🔎 {len(d)} data-quality finding(s)"):
             st.dataframe(
-                pd.DataFrame([{"kind": f.kind, "summary": f.summary,
-                              "magnitude": f.magnitude, "detail": f.detail} for f in d]),
+                pd.DataFrame([{"Kind": f.kind, "Summary": f.summary,
+                              "Magnitude": f.magnitude, "Detail": f.detail} for f in d]),
                 hide_index=True, use_container_width=True,
+                column_config={"Magnitude": st.column_config.NumberColumn(format="euro")},
             )
+    # the writer is asked to weave caveats into the prose; only surface the ones
+    # it left out, so the same sentence isn't printed twice.
+    low = answer.lower()
     for c in br.caveats:
-        st.caption(f"⚠️ {c}")
+        if c.lower().strip(" .") not in low:
+            st.caption(f"⚠️ {c}")
 
 
 def render_extras(msg: dict) -> None:
@@ -98,7 +128,7 @@ def render_extras(msg: dict) -> None:
         st.warning(f"I answered the first {settings.max_sub_questions} part(s); "
                    f"{msg['dropped']} more weren't covered — ask again for those.")
     for br in msg.get("results", []):
-        render_result(br)
+        render_result(br, msg.get("content", ""))
     if msg.get("trace"):
         with st.expander("🧭 Agent trace"):
             st.code("\n".join(msg["trace"]), language=None)
