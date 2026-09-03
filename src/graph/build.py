@@ -17,6 +17,7 @@ import functools
 from typing import Callable
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 
 from src.config import settings
@@ -24,7 +25,21 @@ from src.data.catalog import get_catalog
 from src.data.loader import load_ledger
 from src.graph import analyst, nodes, responder
 from src.graph.state import AgentState, BranchResult
-from src.schemas import Clarification, DATA_INTENTS
+from src.schemas import (Breakdown, Bucket, Clarification, DATA_INTENTS, Finding,
+                         Intent, LedgerQuery, Metric, ResolvedQuery, TimeRange)
+from src.tools.details import Card
+
+
+# Every custom type the checkpointer has to put back together. Without this the
+# serializer only warns and rebuilds them anyway — but that warning says it will
+# become a hard block, at which point BranchResult would come back as a bare dict
+# and the UI would lose its tables. Declaring them keeps that from being a surprise.
+_CHECKPOINT_TYPES = (BranchResult, Breakdown, Bucket, Card, Clarification, Finding,
+                     Intent, LedgerQuery, Metric, ResolvedQuery, TimeRange)
+
+
+def _memory_saver() -> MemorySaver:
+    return MemorySaver(serde=JsonPlusSerializer(allowed_msgpack_modules=_CHECKPOINT_TYPES))
 
 
 def safe_node(fn: Callable) -> Callable:
@@ -132,4 +147,4 @@ def build_graph(checkpointer=None):
                             {"extract": "extract", "responder": "responder"})
     g.add_edge("responder", END)
 
-    return g.compile(checkpointer=checkpointer or MemorySaver())
+    return g.compile(checkpointer=checkpointer or _memory_saver())

@@ -66,16 +66,41 @@ DIM_LABEL = {
 _MONEY = st.column_config.NumberColumn("Value (EUR)", format="euro")
 
 
+def _get(obj, name, default=None):
+    """Read a field off a payload. These arrive as dataclasses; a checkpoint
+    round-trip can hand them back as plain dicts, so read either shape."""
+    return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
+
+
+def _kind(d) -> str:
+    """What the analyst returned, by structure rather than by identity — an
+    isinstance check fails the moment the object survives a round-trip."""
+    if isinstance(d, list):
+        return "findings" if d and _get(d[0], "kind") is not None else ""
+    if isinstance(d, (Card, Metric, Breakdown)):
+        return {Card: "card", Metric: "metric", Breakdown: "breakdown"}[type(d)]
+    if _get(d, "by_type") is not None:
+        return "card"
+    if _get(d, "buckets") is not None:
+        return "breakdown"
+    if _get(d, "value") is not None:
+        return "metric"
+    return ""
+
+
 def bucket_frame(buckets, dimension: str) -> tuple[pd.DataFrame, str]:
     """One tidy frame per breakdown. The dimension gets a real column name —
     Altair cannot encode an unnamed field, and the table reads better for it."""
     col = DIM_LABEL.get(dimension, dimension.replace("_", " ").title() or "Key")
-    df = pd.DataFrame([{col: b.key, "value": b.value, "rows": b.rows} for b in buckets])
+    df = pd.DataFrame([{col: _get(b, "key"), "value": _get(b, "value"),
+                        "rows": _get(b, "rows")} for b in buckets])
     return df, col
 
 
 def render_breakdown(bd, title: str, chart: bool = True) -> None:
-    df, col = bucket_frame(bd.buckets, bd.dimension)
+    df, col = bucket_frame(_get(bd, "buckets", []), _get(bd, "dimension", ""))
+    if df.empty:
+        return
     st.dataframe(df, hide_index=True, use_container_width=True,
                  column_config={"value": _MONEY, "rows": "Rows"})
     if chart and len(df) > 1:
@@ -90,35 +115,41 @@ def render_breakdown(bd, title: str, chart: bool = True) -> None:
 
 
 def render_result(br: BranchResult, answer: str = "") -> None:
-    d = br.data
-    if d is None:
-        return
-    if isinstance(d, Metric):
+    d = _get(br, "data")
+    kind = _kind(d)
+    if kind == "metric":
         pass  # the narrated answer already carries the one number; nothing extra to show
-    elif isinstance(d, Breakdown):
-        period = br.resolved.timeframe_label if br.resolved else ""
-        with st.expander(f"📊 {d.label.capitalize()}" + (f" — {period}" if period else "")):
-            render_breakdown(d, d.label.capitalize())
-    elif isinstance(d, Card):
-        with st.expander(f"📇 {d.title}"):
-            for name, bd in (("Revenue vs expenses", d.by_type), ("By group", d.by_group),
-                             ("Top categories", d.top_categories)):
+    elif kind == "breakdown":
+        resolved = _get(br, "resolved")
+        period = _get(resolved, "timeframe_label", "") if resolved else ""
+        label = str(_get(d, "label", "Breakdown")).capitalize()
+        with st.expander(f"📊 {label}" + (f" — {period}" if period else "")):
+            render_breakdown(d, label)
+    elif kind == "card":
+        with st.expander(f"📇 {_get(d, 'title', 'Details')}"):
+            for name, key in (("Revenue vs expenses", "by_type"), ("By group", "by_group"),
+                              ("Top categories", "top_categories")):
                 st.markdown(f"**{name}**")
-                render_breakdown(bd, name, chart=False)
-            if d.notes:
-                st.caption(" · ".join(d.notes))
-    elif isinstance(d, list) and d and isinstance(d[0], Finding):
+                render_breakdown(_get(d, key), name, chart=False)
+            if _get(d, "notes"):
+                st.caption(" · ".join(_get(d, "notes")))
+    elif kind == "findings":
         with st.expander(f"🔎 {len(d)} data-quality finding(s)"):
             st.dataframe(
-                pd.DataFrame([{"Kind": f.kind, "Summary": f.summary,
-                              "Magnitude": f.magnitude, "Detail": f.detail} for f in d]),
+                pd.DataFrame([{"Kind": _get(f, "kind"), "Summary": _get(f, "summary"),
+                              "Magnitude": _get(f, "magnitude"),
+                              "Detail": _get(f, "detail")} for f in d]),
                 hide_index=True, use_container_width=True,
                 column_config={"Magnitude": st.column_config.NumberColumn(format="euro")},
             )
+    elif _get(br, "headline"):
+        # unrecognised payload shape: the headline is a plain string and always
+        # survives, so the figures still reach the reader.
+        st.caption(_get(br, "headline"))
     # the writer is asked to weave caveats into the prose; only surface the ones
     # it left out, so the same sentence isn't printed twice.
     low = answer.lower()
-    for c in br.caveats:
+    for c in _get(br, "caveats", ()) or ():
         if c.lower().strip(" .") not in low:
             st.caption(f"⚠️ {c}")
 
