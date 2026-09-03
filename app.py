@@ -101,7 +101,7 @@ def render_breakdown(bd, title: str, chart: bool = True) -> None:
     df, col = bucket_frame(_get(bd, "buckets", []), _get(bd, "dimension", ""))
     if df.empty:
         return
-    st.dataframe(df, hide_index=True, use_container_width=True,
+    st.dataframe(df, hide_index=True, width="stretch",
                  column_config={"value": _MONEY, "rows": "Rows"})
     if chart and len(df) > 1:
         st.altair_chart(
@@ -110,7 +110,7 @@ def render_breakdown(bd, title: str, chart: bool = True) -> None:
                 y=alt.Y("value:Q", title="EUR"),
                 tooltip=[col, "value", "rows"],
             ).properties(title=title),
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -139,7 +139,7 @@ def render_result(br: BranchResult, answer: str = "") -> None:
                 pd.DataFrame([{"Kind": _get(f, "kind"), "Summary": _get(f, "summary"),
                               "Magnitude": _get(f, "magnitude"),
                               "Detail": _get(f, "detail")} for f in d]),
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
                 column_config={"Magnitude": st.column_config.NumberColumn(format="euro")},
             )
     elif _get(br, "headline"):
@@ -177,7 +177,7 @@ for msg in st.session_state.messages:
 with st.sidebar:
     st.markdown("**Example prompts**")
     for i, ex in enumerate(EXAMPLES):
-        if st.button(ex, use_container_width=True, key=f"ex_{i}"):
+        if st.button(ex, width="stretch", key=f"ex_{i}"):
             st.session_state.pending_question = ex
             st.rerun()
 
